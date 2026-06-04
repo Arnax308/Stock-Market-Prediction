@@ -1,0 +1,17 @@
+anthropic
+beautifulsoup4
+joblib
+keras
+matplotlib
+nbimporter
+numpy
+pandas
+plotly
+requests
+scipy
+seaborn
+scikit-learn
+tenacity
+tensorflow
+tqdm
+yfinance

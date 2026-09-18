@@ -1,0 +1,20 @@
+# Local WSL GPU launcher & instructions
+start_gpu_jupyter.bat
+WSL_GPU_INSTRUCTIONS.txt
+
+# Virtual Environments
+.venv/
+env/
+venv/
+
+# Jupyter & Python cache
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+# Logs & temp files
+*.log
+.pip-install.*
+
+# Personal Notes
+Notes/

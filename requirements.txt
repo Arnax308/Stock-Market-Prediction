@@ -15,3 +15,4 @@ tenacity
 tensorflow
 tqdm
 yfinance
+lxml

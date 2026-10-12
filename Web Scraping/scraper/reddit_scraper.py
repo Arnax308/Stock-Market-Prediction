@@ -94,11 +94,11 @@ class RedditFinancialScraper:
                 proc = subprocess.run(
                     ["curl.exe", "-s", "-L", "-A", self.DEFAULT_HEADERS["User-Agent"], url],
                     capture_output=True,
-                    text=True,
                     timeout=self.timeout + 2,
                 )
-                if proc.returncode == 0 and "<entry>" in proc.stdout:
-                    raw_xml = proc.stdout
+                stdout_str = proc.stdout.decode("utf-8", errors="ignore")
+                if proc.returncode == 0 and "<entry>" in stdout_str:
+                    raw_xml = stdout_str
                     break
             except Exception:
                 pass

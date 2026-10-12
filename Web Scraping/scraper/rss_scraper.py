@@ -19,13 +19,34 @@ class FinancialRSSScraper:
     BASE_RSS_URL = "https://news.google.com/rss/search?q={}&hl=en-IN&gl=IN&ceid=IN:en"
 
     DEFAULT_QUERIES = [
-        "when:7d site:moneycontrol.com/news/business",
-        "when:7d site:economictimes.indiatimes.com/markets/stocks",
-        "when:7d Nifty 50 stocks earnings",
+        "site:moneycontrol.com Reliance Industries",
+        "site:moneycontrol.com TCS Tata Consultancy Services",
+        "site:moneycontrol.com HDFC Bank",
+        "site:moneycontrol.com Infosys",
+        "site:moneycontrol.com ICICI Bank",
+        "site:moneycontrol.com State Bank of India",
+        "site:moneycontrol.com ITC Limited",
+        "site:moneycontrol.com Bharti Airtel",
+        "site:moneycontrol.com Hindustan Unilever",
+        "site:moneycontrol.com Larsen Toubro",
+        "site:moneycontrol.com crude oil prices Indian economy",
+        "site:moneycontrol.com gold prices India market",
+        "site:moneycontrol.com RBI repo rate monetary policy",
+        "site:economictimes.indiatimes.com Nifty 50 large cap earnings",
     ]
 
     def __init__(self):
         self.results: List[Dict[str, str]] = []
+
+    def _normalize_pubdate(self, raw_date: str) -> str:
+        """Parse RFC 822/email date into ISO format (YYYY-MM-DD HH:MM:SS)."""
+        import email.utils
+        import datetime
+        try:
+            parsed = email.utils.parsedate_to_datetime(raw_date)
+            return parsed.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return raw_date
 
     def fetch_feed(self, query: str, max_items: int = 50) -> List[Dict[str, str]]:
         """Fetch news items for a specific search query from Google News RSS."""
@@ -63,10 +84,12 @@ class FinancialRSSScraper:
                     headline = parts[0].strip()
                     source = parts[1].strip()
 
+                iso_date = self._normalize_pubdate(pub_date)
+
                 record = {
                     "Headlines": headline,
                     "Article": clean_desc,
-                    "Published_At": pub_date,
+                    "Published_At": iso_date,
                     "Source": source,
                     "Category": "financial_rss",
                     "URL": link,
@@ -80,6 +103,54 @@ class FinancialRSSScraper:
         except Exception as e:
             logger.error(f"Failed to fetch RSS feed for query '{query}': {e}")
             return []
+
+    def fetch_historical_by_date_ranges(
+        self,
+        keywords: List[str],
+        start_year: int = 2021,
+        end_year: int = 2024,
+        quarterly: bool = True,
+        max_items_per_chunk: int = 100,
+        checkpoint_path: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """
+        Scrape historical news across multiple years using date-bounded queries.
+        Supports checkpointing directly to JSONL to preserve scraped progress.
+        """
+        import time
+        import json
+        all_items = []
+
+        # Generate date chunks (quarters)
+        date_chunks = []
+        for yr in range(start_year, end_year + 1):
+            if quarterly:
+                quarters = [
+                    (f"{yr}-01-01", f"{yr}-03-31"),
+                    (f"{yr}-04-01", f"{yr}-06-30"),
+                    (f"{yr}-07-01", f"{yr}-09-30"),
+                    (f"{yr}-10-01", f"{yr}-12-31"),
+                ]
+                date_chunks.extend(quarters)
+            else:
+                date_chunks.append((f"{yr}-01-01", f"{yr}-12-31"))
+
+        logger.info(f"Generated {len(date_chunks)} time chunks for {len(keywords)} keywords ({start_year}-{end_year}).")
+
+        for kw in keywords:
+            for start_d, end_d in date_chunks:
+                query = f'{kw} site:moneycontrol.com after:{start_d} before:{end_d}'
+                items = self.fetch_feed(query=query, max_items=max_items_per_chunk)
+                all_items.extend(items)
+
+                if checkpoint_path and items:
+                    with open(checkpoint_path, "a", encoding="utf-8") as f:
+                        for it in items:
+                            f.write(json.dumps(it, ensure_ascii=False) + "\n")
+
+                time.sleep(0.5)  # Responsive, polite spacing between RSS calls
+
+        return all_items
 
     def fetch_all(self, queries: Optional[List[str]] = None, max_items_per_query: int = 30) -> List[Dict[str, str]]:
         """Fetch items across multiple queries."""

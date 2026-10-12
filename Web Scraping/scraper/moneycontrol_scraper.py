@@ -138,23 +138,25 @@ class MoneycontrolScraper:
                 if "promos" in str(li) or "ad" in str(li.get("class", "")).lower():
                     continue
 
-                h2 = li.find(["h2", "a"])
-                if not h2:
-                    continue
-
-                a_tag = h2 if h2.name == "a" else h2.find("a")
+                h2 = li.find(["h2", "h3"])
+                a_tag = (h2.find("a") if h2 and h2.find("a") else None) or li.find("a")
                 if not a_tag or not a_tag.get("href"):
                     continue
 
                 article_url = a_tag["href"].strip()
 
-                # Filter out promotional, audio, or video links
-                if (
-                    "moneycontrol.com/promos/" in article_url
-                    or "/video/" in article_url
-                    or "/podcast/" in article_url
-                    or not article_url.startswith("http")
-                ):
+                # Filter out promotional, audio, video, photo gallery, or web stories
+                invalid_patterns = [
+                    "moneycontrol.com/promos/",
+                    "/video/",
+                    "/videos/",
+                    "/podcast/",
+                    "/audio/",
+                    "/photogallery/",
+                    "/photos/",
+                    "/web-stories/",
+                ]
+                if any(p in article_url.lower() for p in invalid_patterns) or not article_url.startswith("http"):
                     continue
 
                 listing_title = a_tag.get_text(strip=True)
@@ -177,6 +179,81 @@ class MoneycontrolScraper:
             logger.error(f"Error reading listing {url}: {e}")
             return []
 
+    def _extract_published_date(self, soup: BeautifulSoup, html: str, url: str) -> Optional[str]:
+        """
+        Extract publication date using a multi-tiered fallback strategy:
+        1. JSON-LD structured data (schema.org)
+        2. OpenGraph / Article meta tags
+        3. Multiple CSS selectors (article schedule, author date, etc.)
+        4. Date slug in URL regex
+        5. In-page date regex
+        """
+        import json
+        # 1. JSON-LD Schema
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                raw_json = script.string or script.get_text()
+                if not raw_json:
+                    continue
+                data = json.loads(raw_json)
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if isinstance(item, dict):
+                        for key in ["datePublished", "dateCreated", "dateModified"]:
+                            if item.get(key):
+                                return str(item[key]).strip()
+            except Exception:
+                continue
+
+        # 2. Meta tags
+        meta_checks = [
+            {"property": "og:article:published_time"},
+            {"property": "article:published_time"},
+            {"name": "publish-date"},
+            {"name": "Last-Modified"},
+            {"http-equiv": "Last-Modified"},
+            {"property": "og:updated_time"},
+            {"itemprop": "datePublished"},
+        ]
+        for attrs in meta_checks:
+            meta = soup.find("meta", attrs=attrs)
+            if meta and meta.get("content"):
+                return meta["content"].strip()
+
+        # 3. CSS selectors
+        selectors = [
+            ".article_schedule",
+            ".publish_date",
+            ".art-date",
+            ".article_author span",
+            ".date-time",
+            ".ag-date",
+            "time",
+            ".date",
+        ]
+        for sel in selectors:
+            tag = soup.select_one(sel)
+            if tag and tag.get_text(strip=True):
+                txt = tag.get_text(strip=True)
+                if any(char.isdigit() for char in txt):
+                    return txt
+
+        # 4. Regex from URL pattern (e.g. 18-09-2026 or 2026-09-18 or 18-september-2026)
+        url_match = re.search(r"(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}-(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*-\d{4})", url, re.I)
+        if url_match:
+            return url_match.group(1)
+
+        # 5. Regex from HTML
+        date_match = re.search(
+            r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}(?:\s*/\s*\d{1,2}:\d{2}\s*(?:IST|AM|PM)?)?',
+            html,
+            re.IGNORECASE
+        )
+        if date_match:
+            return date_match.group(0).strip()
+
+        return None
+
     def fetch_article_detail(self, item: Dict[str, str]) -> Optional[Dict[str, str]]:
         """Fetch and parse article details from an individual article page."""
         url = item["url"]
@@ -195,15 +272,11 @@ class MoneycontrolScraper:
             h1 = soup.find("h1")
             headline = h1.get_text(strip=True) if h1 else item["title"]
 
-            # Extract publication timestamp
-            published_at = ""
-            date_tag = soup.select_one(".article_schedule, .publish_date, .art-date, .article_author span")
-            if date_tag:
-                published_at = date_tag.get_text(strip=True)
-            else:
-                meta_time = soup.find("meta", property="article:published_time")
-                if meta_time and meta_time.get("content"):
-                    published_at = meta_time["content"]
+            # Extract publication timestamp with multi-tiered fallbacks
+            published_at = self._extract_published_date(soup, html, url)
+            if not published_at:
+                logger.warning(f"Skipping article without timestamp: {url}")
+                return None
 
             # Extract article body using multiple robust selector fallbacks
             content_div = soup.select_one("div#contentdata, div.arti-flow, div.content_wrapper")
@@ -255,10 +328,13 @@ class MoneycontrolScraper:
         max_pages: int = 1,
         max_articles: Optional[int] = None,
         show_progress: bool = True,
+        checkpoint_path: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """
         Scrapes articles from a specific Moneycontrol category across multiple pages.
+        Optionally streams each scraped article immediately to a JSONL checkpoint_path.
         """
+        import json
         category_articles = []
         logger.info(f"Starting scrape for category '{category}' up to {max_pages} pages...")
 
@@ -281,6 +357,12 @@ class MoneycontrolScraper:
                 if article_data:
                     category_articles.append(article_data)
                     self.articles_data.append(article_data)
+                    if checkpoint_path:
+                        try:
+                            with open(checkpoint_path, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(article_data, ensure_ascii=False) + "\n")
+                        except Exception as e:
+                            logger.error(f"Failed to write to checkpoint {checkpoint_path}: {e}")
 
                 self._sleep()
 

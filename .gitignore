@@ -19,3 +19,7 @@ __pycache__/
 # Personal Notes
 Notes/
 scratch/
+# Environment variables & secrets
+.env
+*.env
+*.key

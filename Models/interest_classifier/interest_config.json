@@ -1,0 +1,26 @@
+{
+  "threshold": 0.34,
+  "max_len": 64,
+  "base_model": "ProsusAI/finbert",
+  "input": "Headlines only",
+  "test_scores": {
+    "threshold": 0.34,
+    "accuracy": 0.88,
+    "precision_1": 0.909,
+    "recall_1": 0.938,
+    "f1_1": 0.923,
+    "f1_0": 0.721,
+    "macro_f1": 0.822,
+    "roc_auc": 0.923
+  },
+  "reddit_scores": {
+    "threshold": 0.34,
+    "accuracy": 0.753,
+    "precision_1": 0.504,
+    "recall_1": 0.822,
+    "f1_1": 0.625,
+    "f1_0": 0.815,
+    "macro_f1": 0.72,
+    "roc_auc": 0.863
+  }
+}

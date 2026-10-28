@@ -23,3 +23,9 @@ scratch/
 .env
 *.env
 *.key
+
+# Anaconda JupyterLab file-browser cache
+anaconda_projects/
+
+# Trained model weights (too big for GitHub)
+Models/interest_classifier/*.safetensors
